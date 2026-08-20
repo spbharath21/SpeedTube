@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.git/
+.github/
+logs/
+*.log
+mlruns/
+mlflow.db
+node_modules/
+frontend/build/
+.pytest_cache/

@@ -16,6 +16,7 @@ Phase 5 addition:
 import os
 from dataclasses import dataclass, field
 
+import requests
 from dotenv import load_dotenv
 from langchain_classic.chains.summarize import load_summarize_chain
 from langchain_classic.memory import ConversationBufferWindowMemory
@@ -88,6 +89,23 @@ class VideoIndex:
 # ---------------------------------------------------------------------------
 
 
+def _youtube_http_client():
+    """
+    requests.Session for YouTubeTranscriptApi. Loads cookies.txt (repo root,
+    Netscape format) if present — an authenticated session is less likely to
+    hit YouTube's rate-limit wall than an anonymous one.
+    """
+    import http.cookiejar
+
+    session = requests.Session()
+    cookie_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.txt")
+    if os.path.exists(cookie_path):
+        jar = http.cookiejar.MozillaCookieJar(cookie_path)
+        jar.load(ignore_discard=True, ignore_expires=True)
+        session.cookies = jar
+    return session
+
+
 def create_video_index(video_id: str) -> VideoIndex:
     """
     Ingests a YouTube video and builds the full retrieval index.
@@ -99,7 +117,7 @@ def create_video_index(video_id: str) -> VideoIndex:
     Each child doc stores the index of its parent so we can look it up after retrieval.
     """
     # --- 1a. Fetch transcript ---
-    ytt_api = YouTubeTranscriptApi()
+    ytt_api = YouTubeTranscriptApi(http_client=_youtube_http_client())
     try:
         import xml.etree.ElementTree as ET
 

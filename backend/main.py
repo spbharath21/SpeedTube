@@ -92,7 +92,12 @@ app.add_middleware(
 import redis
 
 try:
-    redis_client = redis.Redis(host="localhost", port=6379, db=0, decode_responses=False)
+    redis_client = redis.Redis(
+        host=os.getenv("REDIS_HOST", "localhost"),
+        port=int(os.getenv("REDIS_PORT", "6379")),
+        db=0,
+        decode_responses=False,
+    )
     redis_client.ping()
     REDIS_AVAILABLE = True
     logger.info("Redis connected successfully")
