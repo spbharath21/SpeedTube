@@ -1,5 +1,7 @@
 # ⚡ SpeedTube
 
+[![CI](https://github.com/divijaiwanth/SpeedTube/actions/workflows/ci.yml/badge.svg)](https://github.com/divijaiwanth/SpeedTube/actions/workflows/ci.yml)
+
 > Get up to speed on any YouTube video — instantly.
 
 SpeedTube is a production-grade RAG (Retrieval-Augmented Generation) system that lets you ask questions, get summaries, and extract insights from any YouTube video using its transcript. Built with advanced retrieval techniques, a FastAPI backend, a React frontend, and production guardrails.
@@ -71,17 +73,23 @@ FastAPI response → React UI
 
 ```
 SpeedTube/
+├── .github/workflows/ci.yml  # Lint (ruff) + frontend build on every push/PR
 ├── backend/
-│   └── main.py              # FastAPI app — all API endpoints + guardrails
+│   ├── main.py               # FastAPI app — all API endpoints + guardrails
+│   └── Dockerfile
 ├── frontend/
-│   └── src/
-│       ├── App.js            # React app — UI components
-│       └── App.css           # Styles
+│   ├── src/
+│   │   ├── App.js            # React app — UI components
+│   │   └── App.css           # Styles
+│   └── Dockerfile
+├── docker-compose.yml         # backend + frontend + redis, one command
 ├── langchain_helper.py       # Core RAG pipeline (Phase 1)
-├── evaluate.py               # RAGAS evaluation pipeline (Phase 2)
-├── logs/                     # Runtime logs (gitignored)
-├── requirements.txt
-└── .env                      # API keys (never committed)
+├── bedrock_helper.py         # AWS Bedrock embeddings + LLM (Phase 5)
+├── evaluate.py                # RAGAS evaluation pipeline (Phase 2)
+├── cookies.txt                # Optional — YouTube session cookies (gitignored)
+├── logs/                      # Runtime logs (gitignored)
+├── pyproject.toml / uv.lock
+└── .env                       # API keys (never committed)
 ```
 
 ---
@@ -272,23 +280,42 @@ Log files rotate at 10MB and are retained for 7 days.
 
 ## Setup
 
-### Prerequisites
+### Option A — Docker Compose (recommended)
+
+Spins up the backend, frontend, and Redis together with one command.
+
+```bash
+git clone https://github.com/divijaiwanth/SpeedTube.git
+cd SpeedTube
+
+# Add your API keys
+cp .env_template .env   # then fill in GROQ_API_KEY / OPENAI_API_KEY
+
+docker compose up --build
+```
+
+- Frontend: `http://localhost:3000`
+- Backend: `http://localhost:8000` (docs at `/docs`)
+
+First run downloads the embedding + reranker models from HuggingFace (~1-3 minutes); they're cached in a named Docker volume, so every run after that starts instantly.
+
+### Option B — Local (no Docker)
+
+#### Prerequisites
 - Python 3.11+
 - Node.js 18+
 - Redis (via WSL on Windows, or Redis Cloud free tier)
 - A [Groq API key](https://console.groq.com) (free)
 
-### Backend
+#### Backend
 
 ```bash
-git clone https://github.com/yourusername/SpeedTube.git
+git clone https://github.com/divijaiwanth/SpeedTube.git
 cd SpeedTube
 
-uv venv
+uv sync
 .venv\Scripts\activate        # Windows
 source .venv/bin/activate     # Mac/Linux
-
-uv pip install -r requirements.txt
 
 # Set environment variables
 $env:GROQ_API_KEY = "gsk_your_key_here"   # Windows
@@ -297,15 +324,12 @@ export GROQ_API_KEY="gsk_your_key_here"   # Mac/Linux
 # Start Redis (Windows via WSL)
 wsl sudo service redis-server start
 
-# Create logs directory
-mkdir logs
-
 # Run backend
 cd backend
 uvicorn main:app --reload --port 8000
 ```
 
-### Frontend
+#### Frontend
 
 ```bash
 cd frontend
@@ -321,14 +345,16 @@ npm start
 - [x] Phase 2 — RAGAS evaluation + MLflow experiment tracking
 - [x] Phase 3 — FastAPI backend + React frontend
 - [x] Phase 4 — Rate limiting, Redis caching, guardrails, circuit breaker, structured logging
-- [X] Phase 5 — AWS Bedrock migration (Claude Haiku)
-! Implementation of full deployement using AWS ECR , Lambda and API Endpoints is pending ( TBD )
+- [x] Phase 5 — AWS Bedrock migration (Titan + Nova Micro)
+- [x] Containerization — Dockerfiles for backend/frontend + docker-compose
+- [x] CI — ruff lint/format + frontend build on every push/PR ([workflow](.github/workflows/ci.yml))
+- [ ] Full deployment via AWS ECR, Lambda, and API Gateway (TBD)
 
 ---
 
 ## Known Limitations
 
 - Context precision and recall metrics score 0 on conversational videos with llama-3.1-8b as judge — will be resolved in Phase 5 with a stronger Bedrock model.
-- YouTube transcript API requires browser cookies for some videos due to IP-based rate limiting.
+- YouTube occasionally rate-limits transcript requests from unauthenticated/cloud IPs (`429`). Drop a `cookies.txt` (Netscape format, exported from a logged-in browser session) in the repo root — `langchain_helper.py` picks it up automatically if present.
 - Circuit breaker state resets on server restart — persistent state coming with Redis in Phase 5.
 - HyDE disabled locally due to inference latency — will be re-enabled on Bedrock.
