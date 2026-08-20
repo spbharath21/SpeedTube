@@ -26,3 +26,5 @@ If you are sure that the described cause is not responsible for this error and t
 2026-06-19 10:32:08 | INFO | backend.main:94 | Redis connected successfully
 2026-06-19 10:33:16 | INFO | backend.main:94 | Redis connected successfully
 2026-06-19 10:34:24 | INFO | backend.main:422 | Cache MISS — building index for video jgpVdJB2sKQ
+2026-08-20 10:00:39 | WARNING | backend.main:101 | Redis not available, falling back to in-memory cache: Error 10061 connecting to localhost:6379. No connection could be made because the target machine actively refused it.
+2026-08-20 10:02:04 | WARNING | backend.main:101 | Redis not available, falling back to in-memory cache: Error 10061 connecting to localhost:6379. No connection could be made because the target machine actively refused it.

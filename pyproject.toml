@@ -27,3 +27,14 @@ dependencies = [
     "python-multipart",
     "mangum",
 ]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+exclude = ["mlruns", "logs", ".venv"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = [
+    "E402",  # module-level imports after sys.path manipulation (backend/main.py needs this)
+]

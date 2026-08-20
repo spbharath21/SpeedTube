@@ -16,12 +16,12 @@ Why each one matters:
   - Loguru          : in prod you need searchable logs, not print statements
 """
 
-import os
-import time
-import pickle
 import hashlib
+import os
+import pickle
+import time
 from typing import Optional
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import parse_qs, urlparse
 
 # ---------------------------------------------------------------------------
 # Loguru — structured logging (replaces standard logging)
@@ -31,9 +31,7 @@ from urllib.parse import urlparse, parse_qs
 #   - One-line setup instead of 5 lines of boilerplate
 #   - Structured JSON output for production (CloudWatch, Datadog etc.)
 #   - Better exception formatting
-
 from loguru import logger
-import os
 
 # Lambda's filesystem is read-only except for /tmp — so we only write to a
 # log file when NOT running in Lambda. In Lambda, stdout is automatically
@@ -42,9 +40,9 @@ IS_LAMBDA = bool(os.getenv("AWS_LAMBDA_FUNCTION_NAME"))
 
 if not IS_LAMBDA:
     logger.add(
-        "logs/speedtube.log",          # log to file
-        rotation="10 MB",              # rotate when file hits 10MB
-        retention="7 days",            # keep 7 days of logs
+        "logs/speedtube.log",  # log to file
+        rotation="10 MB",  # rotate when file hits 10MB
+        retention="7 days",  # keep 7 days of logs
         level="INFO",
         format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {name}:{line} | {message}",
     )
@@ -55,11 +53,10 @@ if not IS_LAMBDA:
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 # Rate limiter — uses client IP address as the key
 # In production you'd use user ID or API key instead
@@ -126,13 +123,14 @@ SESSION_TTL = 60 * 60 * 3  # 3 hours — sessions expire after 3 hours of inacti
 # Think of it like a physical circuit breaker in your house —
 # too much current → breaker trips → you reset it → normal again
 
+
 class CircuitBreaker:
     def __init__(self, failure_threshold: int = 3, cooldown_seconds: int = 60):
         self.failure_threshold = failure_threshold  # failures before opening
-        self.cooldown_seconds = cooldown_seconds    # seconds to wait before trying again
+        self.cooldown_seconds = cooldown_seconds  # seconds to wait before trying again
         self.failure_count = 0
         self.last_failure_time = None
-        self.state = "CLOSED"   # CLOSED, OPEN, HALF_OPEN
+        self.state = "CLOSED"  # CLOSED, OPEN, HALF_OPEN
 
     def call_succeeded(self):
         """Call this when an LLM call succeeds."""
@@ -187,6 +185,7 @@ groq_circuit_breaker = CircuitBreaker(failure_threshold=3, cooldown_seconds=60)
 # This is a lightweight rule-based guardrail.
 # In Phase 5 you could add an LLM-based guardrail that checks
 # if the question is actually related to the video topic.
+
 
 class InputGuardrail:
     # Questions that are clearly trying to jailbreak or misuse the system
@@ -260,10 +259,11 @@ guardrail = InputGuardrail()
 # Session cache helpers (Redis + memory fallback)
 # ---------------------------------------------------------------------------
 
-import sys
 import os
+import sys
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from langchain_helper import create_video_index, get_answer, get_summary, VideoIndex
+from langchain_helper import VideoIndex, create_video_index, get_answer, get_summary
 
 
 def make_session_id(video_id: str) -> str:
@@ -289,16 +289,8 @@ def cache_set(session_id: str, index: VideoIndex, metadata: dict):
         try:
             # Pickle the VideoIndex object to store in Redis
             # We store index and metadata separately
-            redis_client.setex(
-                f"index:{session_id}",
-                SESSION_TTL,
-                pickle.dumps(index)
-            )
-            redis_client.setex(
-                f"meta:{session_id}",
-                SESSION_TTL,
-                pickle.dumps(metadata)
-            )
+            redis_client.setex(f"index:{session_id}", SESSION_TTL, pickle.dumps(index))
+            redis_client.setex(f"meta:{session_id}", SESSION_TTL, pickle.dumps(metadata))
             logger.info(f"Session {session_id} cached in Redis (TTL: {SESSION_TTL}s)")
         except Exception as e:
             logger.error(f"Redis write failed: {e}, falling back to memory")
@@ -343,8 +335,10 @@ def cache_delete(session_id: str):
 # Request / Response schemas
 # ---------------------------------------------------------------------------
 
+
 class IngestRequest(BaseModel):
     url: str
+
 
 class IngestResponse(BaseModel):
     session_id: str
@@ -353,18 +347,22 @@ class IngestResponse(BaseModel):
     message: str
     cached: bool
 
+
 class QueryRequest(BaseModel):
     session_id: str
     question: str
+
 
 class QueryResponse(BaseModel):
     answer: str
     sources: list[str]
     num_sources: int
 
+
 class SummaryResponse(BaseModel):
     summary: str
     summary_type: str
+
 
 class HealthResponse(BaseModel):
     status: str
@@ -380,6 +378,7 @@ START_TIME = time.time()
 # Routes
 # ---------------------------------------------------------------------------
 
+
 @app.get("/health", response_model=HealthResponse, tags=["System"])
 async def health_check():
     return HealthResponse(
@@ -391,7 +390,7 @@ async def health_check():
 
 
 @app.post("/ingest", response_model=IngestResponse, tags=["Video"])
-@limiter.limit("5/minute")   # max 5 video loads per minute per IP
+@limiter.limit("5/minute")  # max 5 video loads per minute per IP
 async def ingest_video(request: Request, body: IngestRequest):
     """
     Load a YouTube video and build the RAG index.
@@ -406,10 +405,7 @@ async def ingest_video(request: Request, body: IngestRequest):
 
     video_id = extract_video_id(body.url)
     if not video_id:
-        raise HTTPException(
-            status_code=400,
-            detail="Could not extract video ID. Make sure it's a valid YouTube URL."
-        )
+        raise HTTPException(status_code=400, detail="Could not extract video ID. Make sure it's a valid YouTube URL.")
 
     session_id = make_session_id(video_id)
 
@@ -454,7 +450,7 @@ async def ingest_video(request: Request, body: IngestRequest):
 
 
 @app.post("/query", response_model=QueryResponse, tags=["RAG"])
-@limiter.limit("10/minute")   # max 10 questions per minute per IP
+@limiter.limit("10/minute")  # max 10 questions per minute per IP
 async def query_video(request: Request, body: QueryRequest):
     """
     Ask a question about a loaded video.
@@ -471,18 +467,12 @@ async def query_video(request: Request, body: QueryRequest):
     # Circuit breaker check
     if not groq_circuit_breaker.can_proceed():
         logger.warning("Circuit breaker OPEN — blocking request to Groq")
-        raise HTTPException(
-            status_code=503,
-            detail="AI service temporarily unavailable. Please try again in a minute."
-        )
+        raise HTTPException(status_code=503, detail="AI service temporarily unavailable. Please try again in a minute.")
 
     # Get session from cache
     index, _ = cache_get(body.session_id)
     if index is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Session not found. Please call /ingest first to load the video."
-        )
+        raise HTTPException(status_code=404, detail="Session not found. Please call /ingest first to load the video.")
 
     logger.info(f"Query: session={body.session_id}, question={body.question[:50]}")
 
@@ -503,35 +493,22 @@ async def query_video(request: Request, body: QueryRequest):
 
 @app.get("/summary", response_model=SummaryResponse, tags=["RAG"])
 @limiter.limit("5/minute")
-async def get_video_summary(
-    request: Request,
-    session_id: str,
-    summary_type: str = "concise"
-):
+async def get_video_summary(request: Request, session_id: str, summary_type: str = "concise"):
     """
     Get a summary of a loaded video.
     Rate limited to 5 requests/minute per IP.
     """
     # Circuit breaker check
     if not groq_circuit_breaker.can_proceed():
-        raise HTTPException(
-            status_code=503,
-            detail="AI service temporarily unavailable. Please try again in a minute."
-        )
+        raise HTTPException(status_code=503, detail="AI service temporarily unavailable. Please try again in a minute.")
 
     valid_types = ["concise", "detailed", "bullets"]
     if summary_type not in valid_types:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid summary_type. Must be one of: {valid_types}"
-        )
+        raise HTTPException(status_code=400, detail=f"Invalid summary_type. Must be one of: {valid_types}")
 
     index, _ = cache_get(session_id)
     if index is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Session not found. Please call /ingest first."
-        )
+        raise HTTPException(status_code=404, detail="Session not found. Please call /ingest first.")
 
     logger.info(f"Summary request: session={session_id}, type={summary_type}")
 

@@ -13,21 +13,20 @@ Phase 5 addition:
     AWS Bedrock (Titan embeddings + Nova Micro) for production deployment.
 """
 
-from youtube_transcript_api import YouTubeTranscriptApi
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import FAISS
-from langchain_community.retrievers import BM25Retriever
-from langchain_core.prompts import PromptTemplate, ChatPromptTemplate
-from langchain_core.documents import Document
-from langchain_core.output_parsers import StrOutputParser
+import os
+from dataclasses import dataclass, field
+
+from dotenv import load_dotenv
 from langchain_classic.chains.summarize import load_summarize_chain
 from langchain_classic.memory import ConversationBufferWindowMemory
+from langchain_community.retrievers import BM25Retriever
+from langchain_community.vectorstores import FAISS
+from langchain_core.documents import Document
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import PromptTemplate
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from sentence_transformers import CrossEncoder
-import numpy as np
-from dataclasses import dataclass, field
-from typing import Optional
-import os
-from dotenv import load_dotenv
+from youtube_transcript_api import YouTubeTranscriptApi
 
 load_dotenv()
 
@@ -52,12 +51,10 @@ if USE_BEDROCK:
     llm = get_bedrock_llm(temperature=0.7)
     print("[langchain_helper] Using AWS Bedrock (Titan + Nova Micro)")
 else:
-    from langchain_huggingface import HuggingFaceEmbeddings
     from langchain_groq import ChatGroq
+    from langchain_huggingface import HuggingFaceEmbeddings
 
-    embeddings = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2"
-    )
+    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
     GROQ_API_KEY = os.getenv("GROQ_API_KEY")
     llm = ChatGroq(model="llama-3.1-8b-instant", api_key=GROQ_API_KEY, temperature=0.7)
     print("[langchain_helper] Using Groq (llama-3.1-8b-instant) + local HuggingFace embeddings")
@@ -71,14 +68,16 @@ reranker = CrossEncoder("BAAI/bge-reranker-base")
 # Data structures
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class VideoIndex:
     """Everything we need to query a single video."""
+
     video_id: str
-    parent_docs: list[Document]      # large chunks sent to LLM
-    child_docs: list[Document]       # small chunks used for retrieval
-    faiss_db: FAISS                  # vector index over child chunks
-    bm25_retriever: BM25Retriever    # keyword index over child chunks
+    parent_docs: list[Document]  # large chunks sent to LLM
+    child_docs: list[Document]  # small chunks used for retrieval
+    faiss_db: FAISS  # vector index over child chunks
+    bm25_retriever: BM25Retriever  # keyword index over child chunks
     memory: ConversationBufferWindowMemory = field(
         default_factory=lambda: ConversationBufferWindowMemory(k=5, return_messages=True)
     )
@@ -87,6 +86,7 @@ class VideoIndex:
 # ---------------------------------------------------------------------------
 # Step 1 — Ingest
 # ---------------------------------------------------------------------------
+
 
 def create_video_index(video_id: str) -> VideoIndex:
     """
@@ -102,6 +102,7 @@ def create_video_index(video_id: str) -> VideoIndex:
     ytt_api = YouTubeTranscriptApi()
     try:
         import xml.etree.ElementTree as ET
+
         transcript = ytt_api.fetch(video_id)
     except ET.ParseError:
         raise ValueError(
@@ -115,9 +116,7 @@ def create_video_index(video_id: str) -> VideoIndex:
 
     # --- 1b. Create parent chunks (large, for LLM context) ---
     parent_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1200,
-        chunk_overlap=200,
-        separators=["\n\n", "\n", ". ", " ", ""]
+        chunk_size=1200, chunk_overlap=200, separators=["\n\n", "\n", ". ", " ", ""]
     )
     parent_docs = parent_splitter.split_documents([raw_doc])
     for i, doc in enumerate(parent_docs):
@@ -125,15 +124,13 @@ def create_video_index(video_id: str) -> VideoIndex:
 
     # --- 1c. Create child chunks (small, for precise retrieval) ---
     child_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=300,
-        chunk_overlap=50,
-        separators=["\n\n", "\n", ". ", " ", ""]
+        chunk_size=300, chunk_overlap=50, separators=["\n\n", "\n", ". ", " ", ""]
     )
     child_docs = []
     for parent_id, parent_doc in enumerate(parent_docs):
         children = child_splitter.split_documents([parent_doc])
         for child in children:
-            child.metadata["parent_id"] = parent_id   # link back to parent
+            child.metadata["parent_id"] = parent_id  # link back to parent
         child_docs.extend(children)
 
     # --- 1d. Build FAISS index on child chunks ---
@@ -160,6 +157,7 @@ def create_video_index(video_id: str) -> VideoIndex:
 # Step 2 — HyDE (Hypothetical Document Embedding)
 # ---------------------------------------------------------------------------
 
+
 def generate_hypothetical_answer(query: str) -> str:
     """
     HyDE: Ask the LLM to generate a *hypothetical* answer to the query,
@@ -169,7 +167,7 @@ def generate_hypothetical_answer(query: str) -> str:
     text than a short question, so cosine similarity works better.
     """
     hyde_prompt = PromptTemplate.from_template(
-        """Write a short paragraph (3-5 sentences) that would answer this question 
+        """Write a short paragraph (3-5 sentences) that would answer this question
 about a YouTube video transcript. Write as if you are excerpting from the transcript.
 Do NOT mention that this is hypothetical.
 
@@ -184,6 +182,7 @@ Hypothetical excerpt:"""
 # ---------------------------------------------------------------------------
 # Step 3 — Hybrid retrieval (BM25 + FAISS via RRF fusion)
 # ---------------------------------------------------------------------------
+
 
 def hybrid_retrieve(index: VideoIndex, query: str, k: int = 60) -> list[Document]:
     """
@@ -209,7 +208,7 @@ def hybrid_retrieve(index: VideoIndex, query: str, k: int = 60) -> list[Document
         return 1.0 / (rank + k)
 
     for rank, doc in enumerate(vector_docs):
-        key = doc.page_content[:100]   # use first 100 chars as dedup key
+        key = doc.page_content[:100]  # use first 100 chars as dedup key
         doc_scores[key] = doc_scores.get(key, 0) + rrf_score(rank)
         doc_map[key] = doc
 
@@ -227,6 +226,7 @@ def hybrid_retrieve(index: VideoIndex, query: str, k: int = 60) -> list[Document
 # Step 4 — Cross-encoder reranking
 # ---------------------------------------------------------------------------
 
+
 def rerank(query: str, docs: list[Document], top_n: int = 3) -> list[Document]:
     """
     Cross-encoder reranking: pass every (query, doc) pair through a small
@@ -238,7 +238,7 @@ def rerank(query: str, docs: list[Document], top_n: int = 3) -> list[Document]:
         return []
 
     pairs = [[query, doc.page_content] for doc in docs]
-    scores = reranker.predict(pairs)                  # shape: (len(docs),)
+    scores = reranker.predict(pairs)  # shape: (len(docs),)
 
     # Attach scores and sort
     scored = sorted(zip(scores, docs), key=lambda x: x[0], reverse=True)
@@ -248,6 +248,7 @@ def rerank(query: str, docs: list[Document], top_n: int = 3) -> list[Document]:
 # ---------------------------------------------------------------------------
 # Step 5 — Parent lookup (child → parent)
 # ---------------------------------------------------------------------------
+
 
 def fetch_parent_docs(index: VideoIndex, child_docs: list[Document]) -> list[Document]:
     """
@@ -267,6 +268,7 @@ def fetch_parent_docs(index: VideoIndex, child_docs: list[Document]) -> list[Doc
 # ---------------------------------------------------------------------------
 # Step 6 — Q&A with conversational memory
 # ---------------------------------------------------------------------------
+
 
 def get_answer(index: VideoIndex, query: str) -> dict:
     """
@@ -309,11 +311,13 @@ Answer:"""
     )
 
     chain = qa_prompt | llm | StrOutputParser()
-    answer = chain.invoke({
-        "question": query,
-        "context": context_text,
-        "chat_history": chat_history,
-    })
+    answer = chain.invoke(
+        {
+            "question": query,
+            "context": context_text,
+            "chat_history": chat_history,
+        }
+    )
     answer = answer.strip()
 
     # Save to memory
@@ -329,6 +333,7 @@ Answer:"""
 # ---------------------------------------------------------------------------
 # Step 7 — Summarisation (map-reduce)
 # ---------------------------------------------------------------------------
+
 
 def get_summary(index: VideoIndex, summary_type: str = "concise") -> str:
     """
@@ -380,16 +385,17 @@ Final summary:"""
 # Step 8 — Key quotes extraction
 # ---------------------------------------------------------------------------
 
+
 def get_key_quotes(index: VideoIndex, n: int = 5) -> list[str]:
     """
     Extract the most memorable or insightful quotes from the transcript.
     """
     # Use a sample of parent docs to stay within context limits
-    sample_docs = index.parent_docs[:min(10, len(index.parent_docs))]
+    sample_docs = index.parent_docs[: min(10, len(index.parent_docs))]
     context = "\n\n".join([doc.page_content for doc in sample_docs])
 
     prompt = PromptTemplate.from_template(
-        """From the following YouTube transcript, extract the {n} most notable, 
+        """From the following YouTube transcript, extract the {n} most notable,
 insightful, or memorable quotes. Return them as a numbered list.
 Only use exact words from the transcript.
 

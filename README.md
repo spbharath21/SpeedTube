@@ -321,7 +321,8 @@ npm start
 - [x] Phase 2 — RAGAS evaluation + MLflow experiment tracking
 - [x] Phase 3 — FastAPI backend + React frontend
 - [x] Phase 4 — Rate limiting, Redis caching, guardrails, circuit breaker, structured logging
-- [ ] Phase 5 — AWS Bedrock migration (Claude Haiku + Titan Embeddings + Lambda deployment)
+- [X] Phase 5 — AWS Bedrock migration (Claude Haiku)
+! Implementation of full deployement using AWS ECR , Lambda and API Endpoints is pending ( TBD )
 
 ---
 

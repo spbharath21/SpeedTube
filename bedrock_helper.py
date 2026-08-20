@@ -26,14 +26,13 @@ Note on model choice:
   requirement while still using genuine, working Bedrock infrastructure.
 """
 
-import boto3
 import json
 import os
-from typing import List
+from typing import Any, List, Optional
+
+import boto3
 from langchain_core.embeddings import Embeddings
 from langchain_core.language_models.llms import LLM
-from typing import Optional, Any
-
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -48,6 +47,7 @@ NOVA_MICRO_MODEL_ID = "amazon.nova-micro-v1:0"
 # Bedrock client (shared across embeddings + LLM)
 # ---------------------------------------------------------------------------
 
+
 def get_bedrock_client():
     """
     Creates a boto3 Bedrock runtime client.
@@ -60,6 +60,7 @@ def get_bedrock_client():
 # ---------------------------------------------------------------------------
 # Titan Embeddings — LangChain-compatible wrapper
 # ---------------------------------------------------------------------------
+
 
 class BedrockTitanEmbeddings(Embeddings):
     """
@@ -102,6 +103,7 @@ class BedrockTitanEmbeddings(Embeddings):
 # Claude Haiku — LangChain-compatible LLM wrapper
 # ---------------------------------------------------------------------------
 
+
 class BedrockNovaLLM(LLM):
     """
     Drop-in replacement for OllamaLLM / ChatGroq, backed by Amazon Nova Micro
@@ -126,15 +128,15 @@ class BedrockNovaLLM(LLM):
         client = get_bedrock_client()
 
         # Nova models use a different request schema than Anthropic models
-        body = json.dumps({
-            "messages": [
-                {"role": "user", "content": [{"text": prompt}]}
-            ],
-            "inferenceConfig": {
-                "maxTokens": self.max_tokens,
-                "temperature": self.temperature,
+        body = json.dumps(
+            {
+                "messages": [{"role": "user", "content": [{"text": prompt}]}],
+                "inferenceConfig": {
+                    "maxTokens": self.max_tokens,
+                    "temperature": self.temperature,
+                },
             }
-        })
+        )
 
         response = client.invoke_model(modelId=self.model_id, body=body)
         result = json.loads(response["body"].read())
@@ -144,6 +146,7 @@ class BedrockNovaLLM(LLM):
 # ---------------------------------------------------------------------------
 # Factory functions — used by langchain_helper.py
 # ---------------------------------------------------------------------------
+
 
 def get_bedrock_embeddings() -> BedrockTitanEmbeddings:
     """Returns a Titan embeddings client ready to use."""
