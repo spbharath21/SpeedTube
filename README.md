@@ -310,7 +310,7 @@ First run downloads the embedding + reranker models from HuggingFace (~1-3 minut
 #### Backend
 
 ```bash
-git clone https://github.com/divijaiwanth/SpeedTube.git
+git clone https://github.com/spbharath21/SpeedTube.git
 cd SpeedTube
 
 uv sync
