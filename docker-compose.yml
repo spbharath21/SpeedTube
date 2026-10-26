@@ -5,6 +5,11 @@ services:
       - "6379:6379"
     volumes:
       - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
 
   backend:
     build:
@@ -16,11 +21,13 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
     env_file:
-      - .env
+      - path: .env
+        required: false
     volumes:
       - hf-cache:/root/.cache/huggingface
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
 
   frontend:
     build:

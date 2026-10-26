@@ -15,6 +15,7 @@ Phase 5 addition:
 
 import os
 from dataclasses import dataclass, field
+from functools import lru_cache
 
 import requests
 from dotenv import load_dotenv
@@ -26,7 +27,6 @@ from langchain_core.documents import Document
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import PromptTemplate
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from sentence_transformers import CrossEncoder
 from youtube_transcript_api import YouTubeTranscriptApi
 
 load_dotenv()
@@ -45,24 +45,43 @@ load_dotenv()
 
 USE_BEDROCK = os.getenv("USE_BEDROCK", "false").lower() == "true"
 
-if USE_BEDROCK:
-    from bedrock_helper import get_bedrock_embeddings, get_bedrock_llm
 
-    embeddings = get_bedrock_embeddings()
-    llm = get_bedrock_llm(temperature=0.7)
-    print("[langchain_helper] Using AWS Bedrock (Titan + Nova Micro)")
-else:
-    from langchain_groq import ChatGroq
+@lru_cache(maxsize=1)
+def get_embeddings_model():
+    """Load the configured embedding model on first use."""
+    if USE_BEDROCK:
+        from bedrock_helper import get_bedrock_embeddings
+
+        return get_bedrock_embeddings()
+
     from langchain_huggingface import HuggingFaceEmbeddings
 
-    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-    GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-    llm = ChatGroq(model="llama-3.1-8b-instant", api_key=GROQ_API_KEY, temperature=0.7)
-    print("[langchain_helper] Using Groq (llama-3.1-8b-instant) + local HuggingFace embeddings")
+    return HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
-# Cross-encoder for reranking — local, no API key needed, used regardless of backend
-# BGE reranker is small (~120MB) and very accurate
-reranker = CrossEncoder("BAAI/bge-reranker-base")
+
+@lru_cache(maxsize=1)
+def get_llm():
+    """Load the configured LLM on first use and provide actionable setup errors."""
+    if USE_BEDROCK:
+        from bedrock_helper import get_bedrock_llm
+
+        return get_bedrock_llm(temperature=0.7)
+
+    groq_api_key = os.getenv("GROQ_API_KEY")
+    if not groq_api_key:
+        raise RuntimeError("GROQ_API_KEY is not configured. Copy .env_template to .env and add your Groq API key.")
+
+    from langchain_groq import ChatGroq
+
+    return ChatGroq(model="llama-3.1-8b-instant", api_key=groq_api_key, temperature=0.7)
+
+
+@lru_cache(maxsize=1)
+def get_reranker():
+    """Load the cross-encoder only when the first query needs reranking."""
+    from sentence_transformers import CrossEncoder
+
+    return CrossEncoder("BAAI/bge-reranker-base")
 
 
 # ---------------------------------------------------------------------------
@@ -156,7 +175,7 @@ def create_video_index(video_id: str) -> VideoIndex:
     # internally in bedrock_helper.py) — for a 300-chunk video that's 300 API
     # calls. Cheap (~$0.0001 total) but not instant. Local HuggingFace embeddings
     # remain faster for iterative dev, which is exactly why the flag exists.
-    faiss_db = FAISS.from_documents(child_docs, embeddings)
+    faiss_db = FAISS.from_documents(child_docs, get_embeddings_model())
 
     # --- 1e. Build BM25 index on child chunks ---
     bm25_retriever = BM25Retriever.from_documents(child_docs)
@@ -193,7 +212,7 @@ Question: {question}
 
 Hypothetical excerpt:"""
     )
-    chain = hyde_prompt | llm | StrOutputParser()
+    chain = hyde_prompt | get_llm() | StrOutputParser()
     return chain.invoke({"question": query})
 
 
@@ -256,7 +275,7 @@ def rerank(query: str, docs: list[Document], top_n: int = 3) -> list[Document]:
         return []
 
     pairs = [[query, doc.page_content] for doc in docs]
-    scores = reranker.predict(pairs)  # shape: (len(docs),)
+    scores = get_reranker().predict(pairs)  # shape: (len(docs),)
 
     # Attach scores and sort
     scored = sorted(zip(scores, docs), key=lambda x: x[0], reverse=True)
@@ -294,8 +313,8 @@ def get_answer(index: VideoIndex, query: str) -> dict:
       query → HyDE → hybrid retrieval → reranking → parent lookup → LLM
 
     Returns dict with answer + retrieved source snippets for transparency.
-    Works identically regardless of USE_BEDROCK — llm and embeddings are
-    swapped at module load time, everything downstream is unchanged.
+    Works identically regardless of USE_BEDROCK — the cached model getters
+    choose the configured backend, while everything downstream is unchanged.
     """
     # Retrieve + rerank
     candidate_docs = hybrid_retrieve(index, query, k=60)
@@ -328,7 +347,7 @@ Instructions:
 Answer:"""
     )
 
-    chain = qa_prompt | llm | StrOutputParser()
+    chain = qa_prompt | get_llm() | StrOutputParser()
     answer = chain.invoke(
         {
             "question": query,
@@ -388,7 +407,7 @@ Final summary:"""
     )
 
     summarise_chain = load_summarize_chain(
-        llm=llm,
+        llm=get_llm(),
         chain_type="map_reduce",
         map_prompt=map_prompt,
         combine_prompt=combine_prompt,
@@ -423,6 +442,6 @@ Transcript:
 Top {n} quotes:"""
     )
 
-    chain = prompt | llm | StrOutputParser()
+    chain = prompt | get_llm() | StrOutputParser()
     result = chain.invoke({"context": context, "n": n})
     return result.strip()

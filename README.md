@@ -289,7 +289,7 @@ git clone https://github.com/divijaiwanth/SpeedTube.git
 cd SpeedTube
 
 # Add your API keys
-cp .env_template .env   # then fill in GROQ_API_KEY / OPENAI_API_KEY
+cp .env_template .env   # then fill in GROQ_API_KEY
 
 docker compose up --build
 ```
@@ -304,7 +304,7 @@ First run downloads the embedding + reranker models from HuggingFace (~1-3 minut
 #### Prerequisites
 - Python 3.11+
 - Node.js 18+
-- Redis (via WSL on Windows, or Redis Cloud free tier)
+- Redis is optional; the API falls back to an in-memory session cache
 - A [Groq API key](https://console.groq.com) (free)
 
 #### Backend
@@ -321,12 +321,8 @@ source .venv/bin/activate     # Mac/Linux
 $env:GROQ_API_KEY = "gsk_your_key_here"   # Windows
 export GROQ_API_KEY="gsk_your_key_here"   # Mac/Linux
 
-# Start Redis (Windows via WSL)
-wsl sudo service redis-server start
-
-# Run backend
-cd backend
-uvicorn main:app --reload --port 8000
+# Run backend from the repository root
+uv run uvicorn backend.main:app --reload --port 8000
 ```
 
 #### Frontend
@@ -348,7 +344,8 @@ npm start
 - [x] Phase 5 — AWS Bedrock migration (Titan + Nova Micro)
 - [x] Containerization — Dockerfiles for backend/frontend + docker-compose
 - [x] CI — ruff lint/format + frontend build on every push/PR ([workflow](.github/workflows/ci.yml))
-- [ ] Full deployment via AWS ECR, Lambda, and API Gateway (TBD)
+
+Optional future work: deploy the existing Bedrock backend through AWS-managed infrastructure.
 
 ---
 
@@ -357,4 +354,3 @@ npm start
 - Context precision and recall metrics score 0 on conversational videos with llama-3.1-8b as judge — will be resolved in Phase 5 with a stronger Bedrock model.
 - YouTube occasionally rate-limits transcript requests from unauthenticated/cloud IPs (`429`). Drop a `cookies.txt` (Netscape format, exported from a logged-in browser session) in the repo root — `langchain_helper.py` picks it up automatically if present.
 - Circuit breaker state resets on server restart — persistent state coming with Redis in Phase 5.
-- HyDE disabled locally due to inference latency — will be re-enabled on Bedrock.

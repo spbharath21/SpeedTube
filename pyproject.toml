@@ -1,7 +1,7 @@
 [project]
-name = "ragtube-youtube-url-based-rag"
+name = "speedtube"
 version = "0.1.0"
-description = "Add your description here"
+description = "Ask questions and generate summaries from YouTube transcripts with hybrid RAG."
 readme = "README.md"
 requires-python = ">=3.11, <3.13"
 dependencies = [
@@ -28,7 +28,9 @@ dependencies = [
     "mangum",
     "boto3>=1.43.75",
     "langchain-groq>=1.1.3",
+    "langchain-openai",
     "pandas>=2.3.3",
+    "ragas",
 ]
 
 [tool.ruff]

@@ -16,12 +16,20 @@ Why each one matters:
   - Loguru          : in prod you need searchable logs, not print statements
 """
 
+from __future__ import annotations
+
 import hashlib
 import os
 import pickle
+import re
 import time
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 from urllib.parse import parse_qs, urlparse
+
+from dotenv import load_dotenv
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
 # ---------------------------------------------------------------------------
 # Loguru — structured logging (replaces standard logging)
@@ -40,7 +48,7 @@ IS_LAMBDA = bool(os.getenv("AWS_LAMBDA_FUNCTION_NAME"))
 
 if not IS_LAMBDA:
     logger.add(
-        "logs/speedtube.log",  # log to file
+        os.path.join(PROJECT_ROOT, "logs", "speedtube.log"),  # log to file
         rotation="10 MB",  # rotate when file hits 10MB
         retention="7 days",  # keep 7 days of logs
         level="INFO",
@@ -74,7 +82,11 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=[
+        origin.strip()
+        for origin in os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",")
+        if origin.strip()
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -97,6 +109,8 @@ try:
         port=int(os.getenv("REDIS_PORT", "6379")),
         db=0,
         decode_responses=False,
+        socket_connect_timeout=1,
+        socket_timeout=1,
     )
     redis_client.ping()
     REDIS_AVAILABLE = True
@@ -246,13 +260,11 @@ class InputGuardrail:
         if not url or not url.strip():
             return False, "URL cannot be empty."
 
-        url_lower = url.lower().strip()
-
-        if "youtube.com" not in url_lower and "youtu.be" not in url_lower:
-            return False, "Only YouTube URLs are supported."
-
         if len(url) > 200:
             return False, "URL is too long."
+
+        if extract_video_id(url) is None:
+            return False, "Enter a valid YouTube video URL."
 
         return True, ""
 
@@ -264,11 +276,12 @@ guardrail = InputGuardrail()
 # Session cache helpers (Redis + memory fallback)
 # ---------------------------------------------------------------------------
 
-import os
 import sys
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from langchain_helper import VideoIndex, create_video_index, get_answer, get_summary
+sys.path.append(PROJECT_ROOT)
+
+if TYPE_CHECKING:
+    from langchain_helper import VideoIndex
 
 
 def make_session_id(video_id: str) -> str:
@@ -276,15 +289,26 @@ def make_session_id(video_id: str) -> str:
 
 
 def extract_video_id(url: str) -> Optional[str]:
+    """Extract a canonical 11-character ID from common YouTube URL formats."""
     try:
-        parsed = urlparse(url)
-        if parsed.hostname in ("youtu.be",):
-            return parsed.path.lstrip("/")
-        if parsed.hostname in ("www.youtube.com", "youtube.com"):
-            qs = parse_qs(parsed.query)
-            return qs.get("v", [None])[0]
+        parsed = urlparse(url.strip())
+        host = (parsed.hostname or "").lower()
+        video_id = None
+
+        if host in ("youtu.be", "www.youtu.be"):
+            video_id = parsed.path.strip("/").split("/")[0]
+        elif host in ("youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com"):
+            if parsed.path == "/watch":
+                video_id = parse_qs(parsed.query).get("v", [None])[0]
+            else:
+                path_parts = parsed.path.strip("/").split("/")
+                if len(path_parts) >= 2 and path_parts[0] in ("embed", "shorts", "live"):
+                    video_id = path_parts[1]
+
+        if video_id and re.fullmatch(r"[A-Za-z0-9_-]{11}", video_id):
+            return video_id
     except Exception:
-        return None
+        pass
     return None
 
 
@@ -429,6 +453,8 @@ async def ingest_video(request: Request, body: IngestRequest):
     # Build the index
     logger.info(f"Cache MISS — building index for video {video_id}")
     try:
+        from langchain_helper import create_video_index
+
         index = create_video_index(video_id)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
@@ -482,6 +508,8 @@ async def query_video(request: Request, body: QueryRequest):
     logger.info(f"Query: session={body.session_id}, question={body.question[:50]}")
 
     try:
+        from langchain_helper import get_answer
+
         result = get_answer(index, body.question)
         groq_circuit_breaker.call_succeeded()
     except Exception as e:
@@ -518,6 +546,8 @@ async def get_video_summary(request: Request, session_id: str, summary_type: str
     logger.info(f"Summary request: session={session_id}, type={summary_type}")
 
     try:
+        from langchain_helper import get_summary
+
         summary = get_summary(index, summary_type)
         groq_circuit_breaker.call_succeeded()
     except Exception as e:

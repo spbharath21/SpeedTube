@@ -8,7 +8,7 @@ on:
 
 jobs:
   backend:
-    name: Backend lint
+    name: Backend lint and tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -21,6 +21,16 @@ jobs:
 
       - name: Format check (ruff)
         run: uvx ruff format --check .
+
+      - name: Unit tests
+        run: >-
+          uv run --no-project
+          --with "fastapi[standard]"
+          --with slowapi
+          --with redis
+          --with loguru
+          --with python-dotenv
+          python -m unittest -v test.py
 
   frontend:
     name: Frontend build
@@ -38,4 +48,7 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - run: npm ci
+      - run: npm test -- --watchAll=false
+        env:
+          CI: true
       - run: npm run build

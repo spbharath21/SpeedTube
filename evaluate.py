@@ -32,10 +32,14 @@ load_dotenv()
 # ---------------------------------------------------------------------------
 # LLM
 # ---------------------------------------------------------------------------
-GrokAPI = os.getenv("GROQ_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 from langchain_groq import ChatGroq
 
-llm = ChatGroq(model="llama-3.1-8b-instant", api_key=GrokAPI, temperature=0.7)
+
+def get_evaluation_llm():
+    if not GROQ_API_KEY:
+        raise RuntimeError("GROQ_API_KEY is not configured. Copy .env_template to .env and add your key.")
+    return ChatGroq(model="llama-3.1-8b-instant", api_key=GROQ_API_KEY, temperature=0.7)
 
 
 # ---------------------------------------------------------------------------
@@ -103,7 +107,7 @@ Respond in this exact JSON format (no other text):
 }}"""
     )
 
-    chain = generation_prompt | llm | StrOutputParser()
+    chain = generation_prompt | get_evaluation_llm() | StrOutputParser()
     dataset = []
     print(f"Generating {len(sampled_chunks)} synthetic Q&A pairs...")
 
@@ -180,19 +184,13 @@ def run_ragas_evaluation(samples: list[EvalSample]) -> tuple[dict, pd.DataFrame]
     from ragas.run_config import RunConfig
 
     ragas_llm = LangchainLLMWrapper(
-        ChatOpenAI(model="llama-3.1-8b-instant", api_key=GrokAPI, base_url="https://api.groq.com/openai/v1")
-    )
-    """
-    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-
-    ragas_llm = LangchainLLMWrapper(
         ChatOpenAI(
-            model="gpt-4.1",  # or gpt-4.1-mini, gpt-4o
-            api_key=OPENAI_API_KEY,
-            temperature=0
+            model="llama-3.1-8b-instant",
+            api_key=GROQ_API_KEY,
+            base_url="https://api.groq.com/openai/v1",
+            temperature=0,
         )
     )
-    """
 
     ragas_embeddings = LangchainEmbeddingsWrapper(
         HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
